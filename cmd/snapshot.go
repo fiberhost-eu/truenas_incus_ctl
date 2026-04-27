@@ -114,7 +114,7 @@ func cloneSnapshot(cmd *cobra.Command, api core.Session, args []string) error {
 	params := []interface{}{outMap}
 	DebugJson(params)
 
-	out, err := core.ApiCall(api, "zfs.snapshot.clone", defaultCallTimeout, params)
+	out, err := CompatApiCall(api, "zfs.snapshot.clone", defaultCallTimeout, params)
 	if err != nil {
 		return err
 	}
@@ -171,11 +171,11 @@ func createSnapshot(cmd *cobra.Command, api core.Session, args []string) error {
 		delMap := make(map[string]interface{})
 		delMap["recursive"] = true
 		delObjRemap := map[string][]interface{}{"": core.ToAnyArray(args)}
-		_, _, _ = MaybeBulkApiCall(api, "zfs.snapshot.delete", 10, []interface{}{args[0], delMap}, delObjRemap, true)
+		_, _, _ = CompatBulkApiCall(api, "zfs.snapshot.delete", 10, []interface{}{args[0], delMap}, delObjRemap, true)
 	}
 
 	objRemap := map[string][]interface{}{"dataset": core.ToAnyArray(datasetList), "name": core.ToAnyArray(nameList)}
-	out, _, err := MaybeBulkApiCall(api, "zfs.snapshot.create", 10, params, objRemap, false)
+	out, _, err := CompatBulkApiCall(api, "zfs.snapshot.create", 10, params, objRemap, false)
 	if err != nil {
 		return err
 	}
@@ -204,7 +204,7 @@ func deleteOrRollbackSnapshot(cmd *cobra.Command, api core.Session, args []strin
 	cmd.SilenceUsage = true
 
 	objRemap := map[string][]interface{}{"": core.ToAnyArray(snapshots)}
-	out, _, err := MaybeBulkApiCall(api, "zfs.snapshot."+cmdType, 10, params, objRemap, false)
+	out, _, err := CompatBulkApiCall(api, "zfs.snapshot."+cmdType, 10, params, objRemap, false)
 	if err != nil {
 		return err
 	}
@@ -236,7 +236,7 @@ func renameSnapshot(cmd *cobra.Command, api core.Session, args []string) error {
 	params := []interface{}{source, dest}
 	DebugJson(params)
 
-	out, err := core.ApiCall(api, "zfs.snapshot.rename", defaultCallTimeout, params)
+	out, err := CompatApiCall(api, "zfs.snapshot.rename", defaultCallTimeout, params)
 	if err != nil {
 		return err
 	}

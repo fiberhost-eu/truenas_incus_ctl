@@ -47,6 +47,14 @@ func QueryApi(api core.Session, category string, entries, entryTypes, propsList 
 		return response, fmt.Errorf("length mismatch between entries and entry types: %d != %d", len(entries), len(entryTypes))
 	}
 
+	// FiberHost dual-API: TrueNAS 26+ премахна zfs.snapshot.query — единен endpoint
+	// zfs.resource.query сега покрива filesystem/volume/snapshot. Route-нем snapshot
+	// заявките към него и преобразуваме response-а към legacy формата, за да остане
+	// останалата logic (insertProperties, ID dedup, etc.) непокътната.
+	if category == "zfs.snapshot" && core.HasNewZfsResourceApi(api) {
+		return queryZfsResourceCompat(api, entries, entryTypes, propsList, params, "SNAPSHOT")
+	}
+
 	filter, err := makeQueryFilter(entries, entryTypes, params)
 	if err != nil {
 		return response, err
@@ -61,6 +69,11 @@ func QueryApi(api core.Session, category string, entries, entryTypes, propsList 
 
 	data, err := core.ApiCall(api, endpoint, defaultCallTimeout, query)
 	if err != nil {
+		// Runtime fallback: ако detection е пропуснало new API (различна сесия,
+		// race), но конкретният endpoint е missing → опитай резервния път.
+		if category == "zfs.snapshot" && core.IsMethodNotFoundError(err) {
+			return queryZfsResourceCompat(api, entries, entryTypes, propsList, params, "SNAPSHOT")
+		}
 		return response, err
 	}
 

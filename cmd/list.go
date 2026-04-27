@@ -209,6 +209,12 @@ func doList(cmd *cobra.Command, api core.Session, args []string) error {
 		}
 		response, err := QueryApi(api, category, qEntriesMap[qType], qEntryTypesMap[qType], properties, extras)
 		if err != nil {
+			// FiberHost patch: TrueNAS 26+ премахна zfs.snapshot.query (рефактор към zfs.resource.query
+			// със съвсем нова сигнатура). Грациозно прескачаме snapshot заявката, за да може dataset
+			// usage queries (`list -o available,used <ds>`) да минат при по-нови TrueNAS builds.
+			if qType == "snapshot" && strings.Contains(err.Error(), "Method does not exist") {
+				continue
+			}
 			return err
 		}
 

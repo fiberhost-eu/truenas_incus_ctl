@@ -200,7 +200,7 @@ func changeServiceStateImpl(api core.Session, newState string, optionalFlags map
 		paramsArray[i] = []interface{} { arg, outMap }
 	}
 
-	out, _, err := MaybeBulkApiCallArray(api, "service." + newState, int64(10 + 10 * len(paramsArray)), paramsArray, true)
+	out, _, err := CompatBulkApiCallArray(api, "service." + newState, int64(10 + 10 * len(paramsArray)), paramsArray, true)
 	if err != nil {
 		return err
 	}
