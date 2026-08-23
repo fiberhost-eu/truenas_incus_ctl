@@ -483,7 +483,9 @@ func renameDataset(cmd *cobra.Command, api core.Session, args []string) error {
 	params := []interface{}{source, outMap}
 	DebugJson(params)
 
-	out, err := core.ApiCall(api, "zfs.dataset.rename", defaultCallTimeout, params)
+	// През Compat*, защото TrueNAS 26 премахна zfs.dataset.rename — това извикване
+	// заобикаляше таблицата за превод и оставаше счупено.
+	out, err := CompatApiCall(api, "zfs.dataset.rename", defaultCallTimeout, params)
 	if err != nil {
 		return err
 	}

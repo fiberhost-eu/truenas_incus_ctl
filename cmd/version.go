@@ -43,11 +43,24 @@ import (
 */
 const VERSION = "0.7.7"
 
+// Build се подава при компилация:
+//   -ldflags "-X truenas/truenas_incus_ctl/cmd.Build=fh1"
+// Пакетният binary от incus-base няма стойност тук, нашият има — панелът
+// различава двата само по низа на версията.
+var Build string
+
+func FullVersion() string {
+	if Build != "" {
+		return VERSION + "+" + Build
+	}
+	return VERSION
+}
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Print the version of this program",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(VERSION)
+		fmt.Println(FullVersion())
 	},
 }
 

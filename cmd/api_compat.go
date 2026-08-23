@@ -24,6 +24,7 @@ import (
 //	service.start          →  service.control                ([action="START", name, opts])
 //	service.stop           →  service.control                ([action="STOP",  name, opts])
 //	service.restart        →  service.control                ([action="RESTART", name, opts])
+//	zfs.dataset.rename     →  pool.dataset.rename            (само името, параметрите съвпадат)
 
 func translateForNewApi(method string, params interface{}) (string, interface{}, bool) {
 	switch method {
@@ -47,6 +48,9 @@ func translateForNewApi(method string, params interface{}) (string, interface{},
 		return "service.control", buildServiceControlParams("STOP", params), true
 	case "service.restart":
 		return "service.control", buildServiceControlParams("RESTART", params), true
+	case "zfs.dataset.rename":
+		// Единствената разлика е името: и двете приемат [id, {new_name, …}].
+		return "pool.dataset.rename", params, true
 	}
 	return method, params, false
 }

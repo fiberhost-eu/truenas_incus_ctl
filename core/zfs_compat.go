@@ -35,11 +35,21 @@ func capsForSession(s Session) *zfsApiCaps {
 // HasNewZfsResourceApi checks once per Session дали TrueNAS-ът поддържа
 // новия zfs.resource.query (26+). Резултатът се кешира.
 func HasNewZfsResourceApi(s Session) bool {
+	useNew, _ := HasNewZfsResourceApiErr(s)
+	return useNew
+}
+
+// HasNewZfsResourceApiErr е същото, но връща и грешката от probe-а.
+//
+// Дотук тя се записваше в caps.hasError и никой не я четеше: недостъпен сървър,
+// изтекъл ключ и „това е стар TrueNAS" бяха неразличими — всички даваха false и
+// изпращаха командата по легаси пътя, където се проваляше с подвеждащо съобщение.
+func HasNewZfsResourceApiErr(s Session) (bool, error) {
 	caps := capsForSession(s)
 	caps.once.Do(func() {
 		caps.useNewZfs, caps.hasError = probeZfsResourceApi(s)
 	})
-	return caps.useNewZfs
+	return caps.useNewZfs, caps.hasError
 }
 
 func probeZfsResourceApi(s Session) (useNew bool, err error) {
