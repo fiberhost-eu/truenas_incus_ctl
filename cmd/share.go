@@ -6,7 +6,7 @@ import (
 
 var shareCmd = &cobra.Command{
 	Use:   "share",
-	Short: "Create, list, update or delete NFS or iSCSI shares.",
+	Short: "Create, list, update or delete NFS, iSCSI or NVMe-oF shares.",
 }
 
 func init() {
