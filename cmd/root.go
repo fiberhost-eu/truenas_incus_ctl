@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"strings"
 	"truenas/truenas_incus_ctl/core"
 
 	"github.com/spf13/cobra"
@@ -31,6 +32,13 @@ var g_configName string
 var g_hostName string
 var g_apiKey string
 
+// Транспортът, по който се изнасят томовете: "iscsi" (по подразбиране) или "nvme".
+//
+// Чете се от профила в config.json, защото Incus подава ИМЕ на профил през ключа
+// `truenas.config` и нищо друго. Така изборът се въвежда в интерфейса на Incus, без
+// самият Incus да знае за NVMe — за него и двата случая връщат път до блоково устройство.
+var g_transport string
+
 func Execute() {
 	err := rootCmd.Execute()
 	if err != nil {
@@ -44,6 +52,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&g_daemonSocketOverride, "daemon-socket", "", "Override the default daemon socket path (~/tncdaemon.sock)")
 	rootCmd.PersistentFlags().StringVarP(&g_configFileName, "config-file", "F", "", "Override config filename (~/.truenas_incus_ctl/config.json)")
 	rootCmd.PersistentFlags().StringVarP(&g_configName, "config", "C", "", "Name of config to look up in config.json, defaults to first entry")
+	rootCmd.PersistentFlags().StringVar(&g_transport, "transport", "", "Export transport: iscsi (default) or nvme. Normally set per-profile in config.json")
 	rootCmd.PersistentFlags().StringVarP(&g_hostName, "host", "H", "", "Server hostname or ip with optional port or URL")
 	rootCmd.PersistentFlags().StringVarP(&g_apiKey, "api-key", "K", "", "API key")
 
@@ -58,6 +67,7 @@ func RemoveGlobalFlags(flags map[string]string) {
 	core.DeleteSnakeKebab(flags, "daemon-socket")
 	core.DeleteSnakeKebab(flags, "config-file")
 	core.DeleteSnakeKebab(flags, "config")
+	core.DeleteSnakeKebab(flags, "transport")
 	core.DeleteSnakeKebab(flags, "host")
 	core.DeleteSnakeKebab(flags, "api-key")
 }
@@ -92,6 +102,11 @@ func InitializeApiClient() core.Session {
 		}
 		if obj, exists := config["daemon_socket"]; exists {
 			g_daemonSocketOverride, _ = obj.(string)
+		}
+		if obj, exists := config["transport"]; exists {
+			if s, ok := obj.(string); ok && g_transport == "" {
+				g_transport = strings.ToLower(strings.TrimSpace(s))
+			}
 		}
 	}
 	if USE_DAEMON {

@@ -190,6 +190,71 @@ func LookupNvmePort(api core.Session, spec string) (int, error) {
 	return id, nil
 }
 
+// LookupNvmeSubNqn връща subnqn-а на subsystem по име, или "" ако го няма.
+//
+// NQN-ът НЕ се сглобява отсам: TrueNAS го прави от `basenqn`, който е свойство на уреда.
+// Познаване наум работи, докато някой не смени basenqn — и тогава гърми при connect, не
+// при създаване, тоест далеч от причината.
+func LookupNvmeSubNqn(api core.Session, name string) (string, error) {
+	params := []interface{}{
+		[]interface{}{[]interface{}{"name", "=", name}},
+		make(map[string]interface{}),
+	}
+	out, err := core.ApiCall(api, "nvmet.subsys.query", defaultCallTimeout, params)
+	if err != nil {
+		return "", err
+	}
+	var response map[string]interface{}
+	if err = json.Unmarshal(out, &response); err != nil {
+		return "", err
+	}
+	results, _ := response["result"].([]interface{})
+	for _, r := range results {
+		if row, ok := r.(map[string]interface{}); ok {
+			if nqn, ok := row["subnqn"].(string); ok && nqn != "" {
+				return nqn, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// LookupNvmePortAddress връща адреса и услугата на порт по id.
+func LookupNvmePortAddress(api core.Session, portId int) (string, int, error) {
+	params := []interface{}{
+		[]interface{}{[]interface{}{"id", "=", portId}},
+		make(map[string]interface{}),
+	}
+	out, err := core.ApiCall(api, "nvmet.port.query", defaultCallTimeout, params)
+	if err != nil {
+		return "", 0, err
+	}
+	var response map[string]interface{}
+	if err = json.Unmarshal(out, &response); err != nil {
+		return "", 0, err
+	}
+	results, _ := response["result"].([]interface{})
+	for _, r := range results {
+		row, ok := r.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		addr, _ := row["addr_traddr"].(string)
+		port := DEFAULT_NVME_PORT
+		if svc, ok := row["addr_trsvcid"].(float64); ok {
+			port = int(svc)
+		} else if svcStr, ok := row["addr_trsvcid"].(string); ok {
+			if n, errNotNumber := strconv.Atoi(svcStr); errNotNumber == nil {
+				port = n
+			}
+		}
+		if addr != "" {
+			return addr, port, nil
+		}
+	}
+	return "", 0, fmt.Errorf("NVMe-oF port %d has no listen address", portId)
+}
+
 // CheckRemoteNvmetServiceIsRunning връща човешко съобщение, ако услугата не върви.
 func CheckRemoteNvmetServiceIsRunning(api core.Session) (string, error) {
 	out, err := core.ApiCall(api, "service.started", defaultCallTimeout, []interface{}{"nvmet"})

@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"strings"
+	"time"
 	"truenas/truenas_incus_ctl/core"
 
 	"github.com/spf13/cobra"
@@ -10,11 +11,19 @@ import (
 
 // NVMe-oF споделяния през nvmet.* API-то на TrueNAS 26+.
 //
-// Защо няма activate/deactivate/locate, каквито има при iSCSI: те са per-том и имат смисъл
-// само ако Incus вика инструмента за всеки том. Incus 7.4 говори с TrueNAS САМО по iSCSI —
-// в целите му метаданни няма нито едно nvme споменаване. Тук таргетът се сглобява веднъж и
-// нодовете се закачат за него сами (nvme connect + LVM отгоре), затова командите са
-// таргет-ориентирани, не том-ориентирани.
+// Командите отразяват iSCSI едно към едно — create, activate, deactivate, locate, delete —
+// защото това е договорът, който Incus очаква.
+//
+// Incus 7.4 НЕ знае за NVMe: в целите му конфигурационни метаданни няма нито едно такова
+// споменаване, а драйверът `truenas` е обвивка около този бинар (Incus докладва версията
+// на драйвера като версията на инструмента). Затова изборът на транспорт живее в ПРОФИЛА
+// на config.json, а Incus го избира по име през ключа `truenas.config`. При `transport=nvme`
+// командите `share iscsi …` се пренасочват насам — Incus иска път до блоково устройство и
+// го получава, без да знае какво има отдолу.
+//
+// Това е съзнателен компромис: командата се казва iscsi, а прави NVMe. Алтернативата беше
+// кръпка в самия Incus, а при „винаги най-новата версия" тя значи прекърпване на всяко
+// издание. Затова пренасочването е шумно на всяко място, където се случва.
 
 var nvmeCmd = &cobra.Command{
 	Use:   "nvme",
@@ -39,6 +48,24 @@ var nvmeListCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(0),
 }
 
+var nvmeActivateCmd = &cobra.Command{
+	Use:   "activate <dataset>...",
+	Short: "Connect to the NVMe-oF subsystems that map to the given datasets",
+	Args:  cobra.MinimumNArgs(1),
+}
+
+var nvmeDeactivateCmd = &cobra.Command{
+	Use:   "deactivate <dataset>...",
+	Short: "Disconnect from the NVMe-oF subsystems that map to the given datasets",
+	Args:  cobra.MinimumNArgs(1),
+}
+
+var nvmeLocateCmd = &cobra.Command{
+	Use:   "locate <dataset>...",
+	Short: "Create and/or connect in one call, printing the device path",
+	Args:  cobra.MinimumNArgs(1),
+}
+
 var nvmeSetupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Verify that the NVMe-oF service is running and a port is configured",
@@ -50,12 +77,25 @@ func init() {
 	nvmeDeleteCmd.RunE = WrapCommandFunc(deleteNvme)
 	nvmeListCmd.RunE = WrapCommandFunc(listNvme)
 	nvmeSetupCmd.RunE = WrapCommandFunc(setupNvme)
+	nvmeActivateCmd.RunE = WrapCommandFunc(activateNvme)
+	nvmeDeactivateCmd.RunE = WrapCommandFunc(deactivateNvme)
+	nvmeLocateCmd.RunE = WrapCommandFunc(locateNvme)
 
-	for _, c := range []*cobra.Command{nvmeCreateCmd, nvmeDeleteCmd, nvmeListCmd, nvmeSetupCmd} {
+	for _, c := range []*cobra.Command{nvmeCreateCmd, nvmeDeleteCmd, nvmeListCmd, nvmeSetupCmd,
+		nvmeActivateCmd, nvmeDeactivateCmd, nvmeLocateCmd} {
 		c.Flags().StringP("target-prefix", "t", "", "label to prefix the created subsystem name")
 		c.Flags().Bool("parsable", false, "Parsable (ie. minimal) output")
 	}
-	for _, c := range []*cobra.Command{nvmeCreateCmd, nvmeDeleteCmd} {
+	nvmeDeactivateCmd.Flags().Bool("wait", false, "Wait for the device to disappear")
+	for _, c := range []*cobra.Command{nvmeLocateCmd} {
+		c.Flags().Bool("create", false, "Create the subsystem if missing")
+		c.Flags().Bool("activate", false, "Connect after creating")
+		c.Flags().Bool("deactivate", false, "Disconnect instead")
+		c.Flags().Bool("delete", false, "Delete instead")
+		c.Flags().Bool("wait", false, "Wait for the device to disappear on deactivate")
+	}
+	for _, c := range []*cobra.Command{nvmeCreateCmd, nvmeDeleteCmd, nvmeActivateCmd,
+		nvmeDeactivateCmd, nvmeLocateCmd} {
 		c.Flags().String("port", "", "NVMe-oF port id or [ip]:[port]. Defaults to the only configured port")
 		c.Flags().String("host-nqn", "", "Initiator NQN allowed to access the subsystem. Empty means any host")
 	}
@@ -64,6 +104,9 @@ func init() {
 	nvmeCmd.AddCommand(nvmeDeleteCmd)
 	nvmeCmd.AddCommand(nvmeListCmd)
 	nvmeCmd.AddCommand(nvmeSetupCmd)
+	nvmeCmd.AddCommand(nvmeActivateCmd)
+	nvmeCmd.AddCommand(nvmeDeactivateCmd)
+	nvmeCmd.AddCommand(nvmeLocateCmd)
 	AddNvmetCrudCommands(nvmeCmd)
 
 	shareCmd.AddCommand(nvmeCmd)
@@ -105,7 +148,7 @@ func createNvme(cmd *cobra.Command, api core.Session, args []string) error {
 	changes := make([]typeApiCallRecord, 0)
 	defer func() { undoIscsiCreateList(api, &changes) }()
 
-	portId, err := LookupNvmePort(api, options.allFlags["port"])
+	portId, err := LookupNvmePort(api, nvmePortSpec(options))
 	if err != nil {
 		return err
 	}
@@ -322,6 +365,133 @@ func listNvme(cmd *cobra.Command, api core.Session, args []string) error {
 	return nil
 }
 
+// activateNvme свързва нода към subsystem-а и връща пътя до блоковото устройство.
+//
+// Това е половината, заради която Incus изобщо може да ползва NVMe: неговият `truenas`
+// драйвър не знае за NVMe, но и не му трябва — той пуска тази команда и чака път до
+// устройство. Какъв е транспортът отдолу е наша работа.
+func activateNvme(cmd *cobra.Command, api core.Session, args []string) error {
+	cmd.SilenceUsage = true
+	if err := requireRootForNvme("activate"); err != nil {
+		return err
+	}
+	options, _ := GetCobraFlags(cmd, false, nil)
+	prefix := strings.TrimSpace(options.allFlags["target_prefix"])
+	isParsable := core.IsStringTrue(options.allFlags, "parsable")
+
+	portId, err := LookupNvmePort(api, nvmePortSpec(options))
+	if err != nil {
+		return err
+	}
+	addr, port, err := LookupNvmePortAddress(api, portId)
+	if err != nil {
+		return err
+	}
+
+	for _, vol := range args {
+		name := nvmeSubsysNameFromVolume(prefix, vol)
+		subNqn, err := LookupNvmeSubNqn(api, name)
+		if err != nil {
+			return err
+		}
+		if subNqn == "" {
+			fmt.Printf("not-found\t%s\n", name)
+			continue
+		}
+
+		if err := RunNvmeConnect(addr, port, subNqn); err != nil {
+			return err
+		}
+
+		dev := WaitForNvmeDevice(subNqn, 30*time.Second)
+		if dev == "" {
+			fmt.Printf("timed-out\t%s\n", subNqn)
+			continue
+		}
+
+		if isParsable {
+			fmt.Println(dev)
+		} else {
+			fmt.Printf("activated\t%s\n", dev)
+		}
+	}
+	return nil
+}
+
+func deactivateNvme(cmd *cobra.Command, api core.Session, args []string) error {
+	cmd.SilenceUsage = true
+	if err := requireRootForNvme("deactivate"); err != nil {
+		return err
+	}
+	options, _ := GetCobraFlags(cmd, false, nil)
+	prefix := strings.TrimSpace(options.allFlags["target_prefix"])
+	shouldWait := core.IsStringTrue(options.allFlags, "wait")
+
+	for _, vol := range args {
+		name := nvmeSubsysNameFromVolume(prefix, vol)
+		subNqn, err := LookupNvmeSubNqn(api, name)
+		if err != nil {
+			return err
+		}
+		if subNqn == "" {
+			fmt.Printf("not-found\t%s\n", name)
+			continue
+		}
+
+		if err := RunNvmeDisconnect(subNqn); err != nil {
+			return err
+		}
+		if shouldWait && !WaitForNvmeDeviceGone(subNqn, 30*time.Second) {
+			fmt.Printf("timed-out\t%s\n", subNqn)
+			continue
+		}
+		fmt.Printf("deactivated\t%s\n", subNqn)
+	}
+	return nil
+}
+
+// locateNvme е „всичко наведнъж" — Incus ползва точно нея при закачане на том.
+func locateNvme(cmd *cobra.Command, api core.Session, args []string) error {
+	cmd.SilenceUsage = true
+	options, _ := GetCobraFlags(cmd, false, nil)
+
+	if core.IsStringTrue(options.allFlags, "create") {
+		if err := createNvme(cmd, api, args); err != nil {
+			return err
+		}
+	}
+	if core.IsStringTrue(options.allFlags, "delete") {
+		return deleteNvme(cmd, api, args)
+	}
+	if core.IsStringTrue(options.allFlags, "deactivate") {
+		return deactivateNvme(cmd, api, args)
+	}
+	if core.IsStringTrue(options.allFlags, "activate") {
+		return activateNvme(cmd, api, args)
+	}
+	return nil
+}
+
+// nvmePortSpec приема и двете имена на флага.
+//
+// Собствените nvme команди го наричат `--port`, но когато Incus вика командата през
+// `share iscsi`, там флагът е `--portal`. Една функция обслужва двете повърхности,
+// вместо да се дублира логиката.
+func nvmePortSpec(options FlagMap) string {
+	if v := strings.TrimSpace(options.allFlags["port"]); v != "" {
+		return v
+	}
+
+	// `--portal` по подразбиране е ":" при iSCSI — „адресът на хоста, портът по
+	// подразбиране". За NVMe това не значи нищо и подадено както е дава
+	// „no NVMe-oF port matches", вместо да се вземе единственият конфигуриран порт.
+	portal := strings.TrimSpace(options.allFlags["portal"])
+	if strings.Trim(portal, ":[] ") == "" {
+		return ""
+	}
+	return portal
+}
+
 func setupNvme(cmd *cobra.Command, api core.Session, args []string) error {
 	cmd.SilenceUsage = true
 
@@ -340,4 +510,22 @@ func setupNvme(cmd *cobra.Command, api core.Session, args []string) error {
 
 	fmt.Printf("Port ID: %d\n", portId)
 	return nil
+}
+
+// isNvmeTransport казва дали профилът е конфигуриран за NVMe-oF вместо iSCSI.
+//
+// Проверява се в НАЧАЛОТО на всяка iSCSI команда, която Incus вика. Дотам конфигурацията
+// вече е прочетена (InitializeApiClient върви в WrapCommandFunc преди самата функция).
+func isNvmeTransport() bool {
+	return g_transport == "nvme"
+}
+
+// dispatchNvme пренасочва iSCSI команда към NVMe и го КАЗВА в дебъг дневника.
+//
+// Мълчаливото пренасочване е рецепта за изгубен половин ден: човек чете `share iscsi
+// activate` в дневника на Incus, търси iSCSI сесия и не намира нищо.
+func dispatchNvme(verb string, fn func(*cobra.Command, core.Session, []string) error,
+	cmd *cobra.Command, api core.Session, args []string) error {
+	DebugString("transport=nvme: \"share iscsi " + verb + "\" is being served over NVMe-oF")
+	return fn(cmd, api, args)
 }

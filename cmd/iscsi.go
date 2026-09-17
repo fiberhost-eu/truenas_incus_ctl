@@ -125,6 +125,9 @@ func init() {
 }
 
 func createIscsi(cmd *cobra.Command, api core.Session, args []string) error {
+	if isNvmeTransport() {
+		return dispatchNvme("create", createNvme, cmd, api, args)
+	}
 	options, _ := GetCobraFlags(cmd, false, nil)
 	prefixName := GetIscsiTargetPrefixOrExit(options.allFlags)
 	cmd.SilenceUsage = true
@@ -408,6 +411,9 @@ func testIscsi(cmd *cobra.Command, api core.Session, args []string) error {
 }
 
 func setupIscsi(cmd *cobra.Command, api core.Session, args []string) error {
+	if isNvmeTransport() {
+		return dispatchNvme("setup", setupNvme, cmd, api, args)
+	}
 	cmd.SilenceUsage = true
 	options, _ := GetCobraFlags(cmd, false, nil)
 
@@ -570,6 +576,9 @@ func getIscsiSharesFromSessionAndDiscovery(options FlagMap, api core.Session, ar
 }
 
 func locateIscsi(cmd *cobra.Command, api core.Session, args []string) error {
+	if isNvmeTransport() {
+		return dispatchNvme("locate", locateNvme, cmd, api, args)
+	}
 	cmd.SilenceUsage = true
 
 	thisUser, err := user.Current()
@@ -692,6 +701,9 @@ type typeIscsiPathAndIqnTarget struct {
 }
 
 func activateIscsi(cmd *cobra.Command, api core.Session, args []string) error {
+	if isNvmeTransport() {
+		return dispatchNvme("activate", activateNvme, cmd, api, args)
+	}
 	cmd.SilenceUsage = true
 
 	thisUser, err := user.Current()
@@ -835,6 +847,9 @@ func doIscsiActivate(api core.Session, targets []typeIscsiLoginSpec, ipAddr stri
 }
 
 func deactivateIscsi(cmd *cobra.Command, api core.Session, args []string) error {
+	if isNvmeTransport() {
+		return dispatchNvme("deactivate", deactivateNvme, cmd, api, args)
+	}
 	cmd.SilenceUsage = true
 
 	thisUser, err := user.Current()
@@ -885,6 +900,9 @@ func deactivateIscsi(cmd *cobra.Command, api core.Session, args []string) error 
 // However, deleting a dataset will delete the extent and target as well.
 // It will deactivate the share before deleting it.
 func deleteIscsi(cmd *cobra.Command, api core.Session, args []string) error {
+	if isNvmeTransport() {
+		return dispatchNvme("delete", deleteNvme, cmd, api, args)
+	}
 	cmd.SilenceUsage = true
 
 	thisUser, err := user.Current()
