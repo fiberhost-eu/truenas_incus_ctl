@@ -64,6 +64,7 @@ func init() {
 	nvmeCmd.AddCommand(nvmeDeleteCmd)
 	nvmeCmd.AddCommand(nvmeListCmd)
 	nvmeCmd.AddCommand(nvmeSetupCmd)
+	AddNvmetCrudCommands(nvmeCmd)
 
 	shareCmd.AddCommand(nvmeCmd)
 }

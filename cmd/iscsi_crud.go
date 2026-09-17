@@ -199,10 +199,10 @@ func AddIscsiCrudCommands(parentCmd *cobra.Command) {
 
 func iscsiCrudQuery(api core.Session, category string, values []string, properties []string, extras typeQueryParams) (typeQueryResponse, error) {
 	if len(values) == 0 {
-		return QueryApi(api, "iscsi."+category, nil, nil, properties, extras)
+		return QueryApi(api, crudEndpoint(category), nil, nil, properties, extras)
 	}
 
-	params := iscsiCrudIdentifierMap[category]
+	params := crudIdentifiers(category)
 	queryValues := make([]string, len(values)*len(params))
 	queryAttrs := make([]string, len(queryValues))
 	for i, attr := range params {
@@ -220,7 +220,7 @@ func iscsiCrudQuery(api core.Session, category string, values []string, properti
 			for j := 0; j < len(values); j++ {
 				queryValues[pos+j] = core.IpPortToJsonString(values[j], defaultHostname, DEFAULT_ISCSI_PORT)
 			}
-		} else if iscsiCrudFeatureMap[category][attr].kind == "StringArray" {
+		} else if crudFeatures(category)[attr].kind == "StringArray" {
 			for j := 0; j < len(values); j++ {
 				if strings.HasPrefix(values[j], "[") {
 					queryValues[pos+j] = values[j]
@@ -237,7 +237,7 @@ func iscsiCrudQuery(api core.Session, category string, values []string, properti
 			queryAttrs[pos+j] = attr
 		}
 	}
-	return QueryApi(api, "iscsi."+category, queryValues, queryAttrs, properties, extras)
+	return QueryApi(api, crudEndpoint(category), queryValues, queryAttrs, properties, extras)
 }
 
 func iscsiQueryTargetExtentWithJoin(api core.Session, values []string, properties []string, extras typeQueryParams) (typeQueryResponse, error) {
@@ -361,7 +361,7 @@ func iscsiCrudList(cmd *cobra.Command, category string, api core.Session, args [
 
 	results := GetListFromQueryResponse(&response)
 
-	required := iscsiCrudIdentifierMap[category]
+	required := crudIdentifiers(category)
 	var columnsList []string
 	if extras.shouldGetAllProps {
 		columnsList = GetUsedPropertyColumns(results, required)
@@ -446,11 +446,11 @@ func iscsiCrudUpdateCreate(cmd *cobra.Command, category string, api core.Session
 
 	cmd.SilenceUsage = true
 
-	method := "iscsi." + category
+	method := crudEndpoint(category)
 	params := []interface{}{outMap}
 
 	if !isUpdate {
-		required := iscsiCrudRequiredAttrMap[category]
+		required := crudRequiredAttrs(category)
 		missingAttrs := make([]string, 0)
 		for _, key := range required {
 			if _, exists := outMap[key]; !exists {
@@ -471,7 +471,7 @@ func iscsiCrudUpdateCreate(cmd *cobra.Command, category string, api core.Session
 		params = append([]interface{}{existingId}, params...)
 		method += ".update"
 	} else {
-		identifiers := iscsiCrudIdentifierMap[category]
+		identifiers := crudIdentifiers(category)
 		queryFilter := make([]interface{}, 0)
 		for _, key := range identifiers {
 			if value, exists := outMap[key]; exists {
@@ -487,7 +487,7 @@ func iscsiCrudUpdateCreate(cmd *cobra.Command, category string, api core.Session
 			queryFilter,
 			make(map[string]interface{}),
 		}
-		out, err := core.ApiCall(api, "iscsi."+category+".query", defaultCallTimeout, queryParams)
+		out, err := core.ApiCall(api, crudEndpoint(category)+".query", defaultCallTimeout, queryParams)
 		if err != nil {
 			return err
 		}
@@ -572,7 +572,7 @@ func iscsiCrudDelete(cmd *cobra.Command, category string, api core.Session, args
 		}
 	}
 	if len(idsToDelete) > 0 {
-		out, _, err := MaybeBulkApiCallArray(api, "iscsi."+category+".delete", int64(10+10*len(idsToDelete)), idsToDelete, true)
+		out, _, err := MaybeBulkApiCallArray(api, crudEndpoint(category)+".delete", int64(10+10*len(idsToDelete)), idsToDelete, true)
 		if err != nil {
 			return err
 		}
